@@ -11,10 +11,12 @@ import { NextRequest, NextResponse } from 'next/server';
 import connectDB from '@/lib/mongodb';
 import Room from '@/models/Room';
 import { verifyToken } from '@/lib/auth';
+import mongoose from 'mongoose';
+
 
 export async function GET(
   request: Request,
-  { params }: { params: Promise<{ id: string }> }
+  { params }: { params: { id: string } }
 ) {
 
   try {
@@ -39,7 +41,15 @@ export async function GET(
 
     await connectDB();
 
-    const { id } = await params;
+    const { id } = params;
+
+     // 🔥 VERY IMPORTANT: validate ObjectId
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return NextResponse.json(
+        { message: 'Invalid room ID' },
+        { status: 400 }
+      );
+    }
 
     // Get room details
     const room = await Room.findById(id)
