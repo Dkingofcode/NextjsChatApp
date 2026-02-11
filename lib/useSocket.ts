@@ -15,7 +15,6 @@ export function useSocket(roomId?: string) {
     }
 
     const socketInstance = io(process.env.NEXT_PUBLIC_SOCKET_URL, {
-      transports: ['websocket'],
       reconnection: true,
       reconnectionAttempts: 5,
     });
