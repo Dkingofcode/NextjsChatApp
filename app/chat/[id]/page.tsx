@@ -1,6 +1,6 @@
 'use client';
 
-// app/chat/[roomId]/page.tsx
+// app/chat/[id]/page.tsx
 import { useState, useEffect, useRef } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { useAuthStore } from '@/store/useAuthStore';
@@ -47,7 +47,7 @@ export default function ChatRoomPage() {
 
   
   const { user, token, isAuthenticated } = useAuthStore();
-  const { socket, isConnected } = useSocket();
+  const { socket, isConnected } = useSocket(roomId);
   
   const [room, setRoom] = useState<Room | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -133,140 +133,117 @@ const [aiStreaming, setAiStreaming] = useState(false);
   }, [roomId, token]);
 
   // Socket.IO real-time messaging
-  useEffect(() => {
-    if (!socket || !roomId || !user) return;
+ useEffect(() => {
+  if (!socket || !user) return;
 
-    console.log('Joining room:', roomId);
-    socket.emit('join-room', roomId);
-    console.log(messages);
+  const handleNewMessage = (message: any) => {
+    setMessages(prev => {
+      // 1️⃣ Prevent duplicate messages
+      if (prev.some(m => m.id === message.id)) return prev;
 
-   // Listen for new messages
-    socket.on('new-message', (message: any) => {
-      console.log('New message received:', message);
-      
-      // Add message if not already in list
-      setMessages((prev) => {
-        const exists = prev.some((m) => m.id === message.id);
-        if (exists) return prev;
-        
-        return [...prev, {
+      // 2️⃣ Replace temp message if exists
+      const tempIndex = prev.findIndex(
+        m =>
+          m.userId._id === message.userId._id &&
+          m.text === message.text &&
+          m.id.startsWith('temp_')
+      );
+
+      if (tempIndex !== -1) {
+        const newMessages = [...prev];
+        newMessages[tempIndex] = {
           id: message.id,
           roomId: message.roomId,
-          userId: {
-            _id: message.userId,
-            displayName: message.displayName,
-            avatar: message.avatar,
-            email: '',
-          },
+          userId: message.userId,
           text: message.text,
           createdAt: message.timestamp,
           edited: false,
-        }];
-      });
-    });
-    
-console.log(messages);
-
-//     socket.on("new-message", (message: Message) => {
-
-// console.log(messages);
-
-//       setMessages(prev => {
-//     if (prev.some(m => m.id === message.id)) return prev;
-//     return [...prev, message];
-//   });
-  
-
-// });
-
-console.log(messages);
-
-
-
-
-
-    // Listen for typing indicators
-    socket.on('user-typing-start', (data: any) => {
-      if (data.userId !== user._id) {
-        setTypingUsers((prev) => {
-          if (prev.includes(data.displayName)) return prev;
-          return [...prev, data.displayName];
-        });
+        };
+        return newMessages;
       }
+
+      // 3️⃣ Otherwise, just append
+      return [
+        ...prev,
+        {
+          id: message.id,
+          roomId: message.roomId,
+          userId: message.userId,
+          text: message.text,
+          createdAt: message.timestamp,
+          edited: false,
+        },
+      ];
     });
+  };
 
-    socket.on('user-typing-stop', (data: any) => {
-      setTypingUsers((prev) => prev.filter((name) => name !== data.displayName));
-    });
+  socket.on('new-message', handleNewMessage);
 
-    return () => {
-      console.log('Leaving room:', roomId);
-      socket.emit('leave-room', roomId);
-      socket.off('new-message');
-      socket.off('user-typing-start');
-      socket.off('user-typing-stop');
-    };
-  }, [socket, roomId, user]);
+  socket.on('user-typing-start', (data: any) => {
+    if (data.userId !== user._id) {
+      setTypingUsers(prev =>
+        prev.includes(data.displayName) ? prev : [...prev, data.displayName]
+      );
+    }
+  });
 
-  // Auto-scroll to bottom
+  socket.on('user-typing-stop', (data: any) => {
+    setTypingUsers(prev => prev.filter(name => name !== data.displayName));
+  });
+
+  return () => {
+    socket.off('new-message', handleNewMessage);
+    socket.off('user-typing-start');
+    socket.off('user-typing-stop');
+  };
+}, [socket, user]);
+
+
+
+// Auto-scroll to bottom
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
   // Send message
-  const handleSendMessage = async (e: React.FormEvent) => {
-    e.preventDefault();
-    
-    if (!inputText.trim() || !user || !socket) return;
+const handleSendMessage = async (e: React.FormEvent) => {
+  e.preventDefault();
+  if (!inputText.trim() || !user || !socket) return;
 
-    setIsSending(true);
+  setIsSending(true);
+  const textToSend = inputText.trim();
 
-    console.log("Sending to RoomId:", roomId);
-    const messageData = {
-      id: `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-      roomId: roomId,
+  // Temporary message for immediate UI feedback
+  const tempId = `temp_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+  setMessages(prev => [
+    ...prev,
+    {
+      id: tempId,
+      roomId,
+      userId: user,
+      text: textToSend,
+      createdAt: new Date().toISOString(),
+      edited: false,
+    },
+  ]);
+  setInputText('');
+
+  // ⚡ Emit to Socket.IO server directly
+  socket.emit("send-message", {
+    roomId,
+    message: {
+      id: tempId,
+      text: textToSend,
       userId: user._id,
       displayName: user.displayName,
       avatar: user.avatar,
-      text: inputText.trim(),
-      timestamp: new Date().toISOString(),
-    };
+      createdAt: new Date().toISOString(),
+    },
+  });
 
-    try {
-      // Send via Socket.IO for real-time delivery
-      socket.emit('send-message', messageData);
+  setIsSending(false);
+};
 
-      // Also save to database
-      await fetch('/api/messages/send', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          roomId,
-          text: inputText.trim(),
-        }),
-      });
-          console.log("Message Sent to RoomId:", roomId);
-
-      console.log('Message sent:', messageData);
-
-      setInputText('');
-      
-      // Stop typing indicator
-      socket.emit('typing-stop', {
-        roomId,
-        userId: user._id,
-        displayName: user.displayName,
-      });
-    } catch (error) {
-      console.error('Send message error:', error);
-      toast.error('Failed to send message');
-    } finally {
-      setIsSending(false);
-    }
-  };
 
 const handleAskAI = async () => {
   if (!aiPrompt.trim()) return;

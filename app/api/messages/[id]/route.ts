@@ -38,7 +38,9 @@ export async function GET(
     const skip = parseInt(searchParams.get('skip') || '0');
 
     // Get messages for the room
-    const messages = await Message.find({ id })
+    const messages = await Message.find({
+       roomId: id, 
+      })
       .populate('userId', 'displayName avatar email')
       .sort({ createdAt: -1 })
       .limit(limit)
