@@ -97,6 +97,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import connectDB from '@/lib/mongodb';
 import Room from '@/models/Room';
+import User from '@/models/User';
 import { verifyToken } from '@/lib/auth';
 import mongoose from 'mongoose';
 
